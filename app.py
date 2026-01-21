@@ -1,31 +1,28 @@
 from flask import Flask, request, jsonify
 import os
-from datetime import datetime
 
 app = Flask(__name__)
 
-UPLOAD_FOLDER = "uploads"
+UPLOAD_FOLDER = "/tmp/uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 @app.route("/")
-def home():
-    return "Render Flask Server Running"
+def index():
+    return "Mr.A HiveSec Server is running."
 
 @app.route("/logs", methods=["POST"])
-def upload_log():
+def upload_logs():
     if "file" not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
+        return jsonify({"status": "error", "message": "No file part"}), 400
 
     file = request.files["file"]
     if file.filename == "":
-        return jsonify({"error": "Empty filename"}), 400
+        return jsonify({"status": "error", "message": "No selected file"}), 400
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{timestamp}_{file.filename}"
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
-    file.save(filepath)
+    save_path = os.path.join(UPLOAD_FOLDER, file.filename)
+    file.save(save_path)
 
-    return jsonify({"success": True, "filename": filename}), 200
+    return jsonify({"status": "success", "message": f"Saved to {save_path}"}), 200
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5051)
