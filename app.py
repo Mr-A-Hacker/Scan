@@ -1,28 +1,42 @@
-from flask import Flask, request, jsonify
 import os
+from flask import Flask, request, jsonify, send_from_directory
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 
-UPLOAD_FOLDER = "/tmp/uploads"
+UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-@app.route("/")
-def index():
-    return "Mr.A HiveSec Server is running."
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
-@app.route("/logs", methods=["POST"])
-def upload_logs():
+@app.route("/")
+def home():
+    return "✅ Server is running"
+
+@app.route("/upload", methods=["POST"])
+def upload():
     if "file" not in request.files:
-        return jsonify({"status": "error", "message": "No file part"}), 400
+        return "❌ No file part", 400
 
     file = request.files["file"]
+
     if file.filename == "":
-        return jsonify({"status": "error", "message": "No selected file"}), 400
+        return "❌ No selected file", 400
 
-    save_path = os.path.join(UPLOAD_FOLDER, file.filename)
-    file.save(save_path)
+    filename = secure_filename(file.filename)
+    filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+    file.save(filepath)
 
-    return jsonify({"status": "success", "message": f"Saved to {save_path}"}), 200
+    return jsonify({
+        "status": "success",
+        "filename": filename,
+        "path": filepath
+    })
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5051)
+@app.route("/files")
+def list_files():
+    return jsonify(os.listdir(app.config["UPLOAD_FOLDER"]))
+
+@app.route("/files/<filename>")
+def get_file(filename):
+    return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
