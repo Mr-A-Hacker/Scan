@@ -107,7 +107,9 @@ def download_file(filename):
     # Find the file version
     for file_version, _ in bucket.ls():
         if file_version.file_name == filename:
-            data = bucket.download_file_by_id(file_version.id_).read()
+            downloaded = bucket.download_file_by_id(file_version.id_)
+            data = downloaded.download()  # <-- THIS is the correct method
+
             return send_file(
                 BytesIO(data),
                 as_attachment=True,
@@ -115,6 +117,7 @@ def download_file(filename):
             )
 
     return jsonify({"error": "file not found"}), 404
+
 
 
 # ----------------------------------------------------
