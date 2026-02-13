@@ -41,24 +41,13 @@ def upload():
     if file.filename == "":
         return "❌ No selected file", 400
 
-    # Use the filename provided by the client
     filename = secure_filename(file.filename)
 
-    # OPTIONAL: Force filename to be based on client IP
-    # client_ip = request.remote_addr.replace(".", "-")
-    # filename = f"{client_ip}.txt"
-
-    # Connect to B2
     b2 = get_b2()
     bucket = b2.get_bucket_by_name(os.getenv("B2_BUCKET_NAME"))
 
-    # Upload bytes directly
-    bucket.upload_bytes(
-        file.read(),
-        filename
-    )
+    bucket.upload_bytes(file.read(), filename)
 
-    # Build file URL (private bucket will NOT open directly)
     endpoint = os.getenv("B2_BUCKET_ENDPOINT")
     bucket_name = os.getenv("B2_BUCKET_NAME")
     file_url = f"https://{endpoint}/file/{bucket_name}/{filename}"
@@ -71,15 +60,13 @@ def upload():
 
 
 # ----------------------------------------------------
-# List Files in Backblaze
+# List Files
 # ----------------------------------------------------
 @app.route("/files")
 def list_files():
     b2 = get_b2()
     bucket = b2.get_bucket_by_name(os.getenv("B2_BUCKET_NAME"))
-
     files = [f.file_name for f, _ in bucket.ls()]
-
     return jsonify(files)
 
 
@@ -90,59 +77,70 @@ def list_files():
 def get_file(filename):
     endpoint = os.getenv("B2_BUCKET_ENDPOINT")
     bucket_name = os.getenv("B2_BUCKET_NAME")
-
     file_url = f"https://{endpoint}/file/{bucket_name}/{filename}"
-
     return jsonify({"url": file_url})
 
 
 # ----------------------------------------------------
-# Download File (works with PRIVATE buckets)
+# VIEW File in Browser (BEST OPTION)
+# ----------------------------------------------------
+@app.route("/view/<filename>")
+def view_file(filename):
+    b2 = get_b2()
+    bucket = b2.get_bucket_by_name(os.getenv("B2_BUCKET_NAME"))
+
+    for file_version, _ in bucket.ls():
+        if file_version.file_name == filename:
+            downloaded = bucket.download_file_by_id(file_version.id_)
+
+            buffer = BytesIO()
+            downloaded.save_to(buffer)   # <-- WORKS ON YOUR SDK
+            buffer.seek(0)
+
+            # Show file as plain text in browser
+            content = buffer.read().decode("utf-8", errors="ignore")
+            return f"<pre>{content}</pre>"
+
+    return "File not found", 404
+
+
+# ----------------------------------------------------
+# Download File (optional)
 # ----------------------------------------------------
 @app.route("/download/<filename>")
 def download_file(filename):
     b2 = get_b2()
     bucket = b2.get_bucket_by_name(os.getenv("B2_BUCKET_NAME"))
 
-    # Find the file version
     for file_version, _ in bucket.ls():
         if file_version.file_name == filename:
             downloaded = bucket.download_file_by_id(file_version.id_)
 
             buffer = BytesIO()
-            downloaded.save_to(buffer)   # <-- THIS WORKS ON YOUR VERSION
+            downloaded.save_to(buffer)
             buffer.seek(0)
 
-            # Show file in browser instead of forcing download
             return send_file(
                 buffer,
-                mimetype="text/plain",   # or "application/pdf" if PDF
-                download_name=filename,
-                as_attachment=False      # <-- SHOW IN BROWSER
+                as_attachment=True,
+                download_name=filename
             )
 
     return jsonify({"error": "file not found"}), 404
 
 
-
-
-
 # ----------------------------------------------------
-# Delete File from Backblaze
+# Delete File
 # ----------------------------------------------------
 @app.route("/delete/<filename>", methods=["DELETE"])
 def delete_file(filename):
     b2 = get_b2()
     bucket = b2.get_bucket_by_name(os.getenv("B2_BUCKET_NAME"))
 
-    # Search for the file version
     for file_version, _ in bucket.ls():
         if file_version.file_name == filename:
             bucket.delete_file_version(file_version.id_, file_version.file_name)
-            return jsonify({
-                "status": "deleted",
-                "filename": filename
-            })
+            return jsonify({"status": "deleted", "filename": filename})
 
     return jsonify({"error": "file not found"}), 404
 
