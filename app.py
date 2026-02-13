@@ -108,15 +108,21 @@ def download_file(filename):
     for file_version, _ in bucket.ls():
         if file_version.file_name == filename:
             downloaded = bucket.download_file_by_id(file_version.id_)
-            data = downloaded.get_bytes()  # <-- WORKS on your version
 
+            buffer = BytesIO()
+            downloaded.save_to(buffer)   # <-- THIS WORKS ON YOUR VERSION
+            buffer.seek(0)
+
+            # Show file in browser instead of forcing download
             return send_file(
-                BytesIO(data),
-                as_attachment=True,
-                download_name=filename
+                buffer,
+                mimetype="text/plain",   # or "application/pdf" if PDF
+                download_name=filename,
+                as_attachment=False      # <-- SHOW IN BROWSER
             )
 
     return jsonify({"error": "file not found"}), 404
+
 
 
 
