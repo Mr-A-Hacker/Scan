@@ -1,23 +1,14 @@
 import os
 from flask import Flask, request, jsonify, send_file
 from werkzeug.utils import secure_filename
-from b2sdk.v2 import InMemoryAccountInfo, B2Api
-from io import BytesIO
 
 app = Flask(__name__)
 
 # ----------------------------------------------------
-# Backblaze B2 Client
+# Ensure uploads folder exists
 # ----------------------------------------------------
-def get_b2():
-    info = InMemoryAccountInfo()
-    b2 = B2Api(info)
-    b2.authorize_account(
-        "production",
-        os.getenv("B2_KEY_ID"),
-        os.getenv("B2_APPLICATION_KEY")
-    )
-    return b2
+UPLOAD_FOLDER = "uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
 # ----------------------------------------------------
@@ -25,11 +16,11 @@ def get_b2():
 # ----------------------------------------------------
 @app.route("/")
 def home():
-    return "✅ Backblaze-enabled server is running"
+    return "✅ Local-storage server is running"
 
 
 # ----------------------------------------------------
-# Upload File to Backblaze
+# Upload File (Saves Locally)
 # ----------------------------------------------------
 @app.route("/upload", methods=["POST"])
 def upload():
@@ -42,20 +33,14 @@ def upload():
         return "❌ No selected file", 400
 
     filename = secure_filename(file.filename)
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
 
-    b2 = get_b2()
-    bucket = b2.get_bucket_by_name(os.getenv("B2_BUCKET_NAME"))
-
-    bucket.upload_bytes(file.read(), filename)
-
-    endpoint = os.getenv("B2_BUCKET_ENDPOINT")
-    bucket_name = os.getenv("B2_BUCKET_NAME")
-    file_url = f"https://{endpoint}/file/{bucket_name}/{filename}"
+    file.save(filepath)
 
     return jsonify({
         "status": "success",
         "filename": filename,
-        "url": file_url
+        "path": filepath
     })
 
 
@@ -64,70 +49,37 @@ def upload():
 # ----------------------------------------------------
 @app.route("/files")
 def list_files():
-    b2 = get_b2()
-    bucket = b2.get_bucket_by_name(os.getenv("B2_BUCKET_NAME"))
-    files = [f.file_name for f, _ in bucket.ls()]
+    files = os.listdir(UPLOAD_FOLDER)
     return jsonify(files)
 
 
 # ----------------------------------------------------
-# Get File URL (still private)
-# ----------------------------------------------------
-@app.route("/files/<filename>")
-def get_file(filename):
-    endpoint = os.getenv("B2_BUCKET_ENDPOINT")
-    bucket_name = os.getenv("B2_BUCKET_NAME")
-    file_url = f"https://{endpoint}/file/{bucket_name}/{filename}"
-    return jsonify({"url": file_url})
-
-
-# ----------------------------------------------------
-# VIEW File in Browser (BEST OPTION)
+# View File in Browser
 # ----------------------------------------------------
 @app.route("/view/<filename>")
 def view_file(filename):
-    b2 = get_b2()
-    bucket = b2.get_bucket_by_name(os.getenv("B2_BUCKET_NAME"))
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
 
-    for file_version, _ in bucket.ls():
-        if file_version.file_name == filename:
-            downloaded = bucket.download_file_by_id(file_version.id_)
+    if not os.path.exists(filepath):
+        return "File not found", 404
 
-            buffer = BytesIO()
-            downloaded.save_to(buffer)   # <-- WORKS ON YOUR SDK
-            buffer.seek(0)
+    with open(filepath, "r", errors="ignore") as f:
+        content = f.read()
 
-            # Show file as plain text in browser
-            content = buffer.read().decode("utf-8", errors="ignore")
-            return f"<pre>{content}</pre>"
-
-    return "File not found", 404
-
+    return f"<pre>{content}</pre>"
 
 
 # ----------------------------------------------------
-# Download File (optional)
+# Download File
 # ----------------------------------------------------
 @app.route("/download/<filename>")
 def download_file(filename):
-    b2 = get_b2()
-    bucket = b2.get_bucket_by_name(os.getenv("B2_BUCKET_NAME"))
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
 
-    for file_version, _ in bucket.ls():
-        if file_version.file_name == filename:
-            downloaded = bucket.download_file_by_id(file_version.id_)
+    if not os.path.exists(filepath):
+        return jsonify({"error": "file not found"}), 404
 
-            buffer = BytesIO()
-            downloaded.save_to(buffer)
-            buffer.seek(0)
-
-            return send_file(
-                buffer,
-                as_attachment=True,
-                download_name=filename
-            )
-
-    return jsonify({"error": "file not found"}), 404
+    return send_file(filepath, as_attachment=True)
 
 
 # ----------------------------------------------------
@@ -135,15 +87,13 @@ def download_file(filename):
 # ----------------------------------------------------
 @app.route("/delete/<filename>", methods=["DELETE"])
 def delete_file(filename):
-    b2 = get_b2()
-    bucket = b2.get_bucket_by_name(os.getenv("B2_BUCKET_NAME"))
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
 
-    for file_version, _ in bucket.ls():
-        if file_version.file_name == filename:
-            bucket.delete_file_version(file_version.id_, file_version.file_name)
-            return jsonify({"status": "deleted", "filename": filename})
+    if not os.path.exists(filepath):
+        return jsonify({"error": "file not found"}), 404
 
-    return jsonify({"error": "file not found"}), 404
+    os.remove(filepath)
+    return jsonify({"status": "deleted", "filename": filename})
 
 
 # ----------------------------------------------------
