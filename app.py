@@ -86,6 +86,6 @@ def delete_file(filename):
     res = supabase.storage.from_(SUPABASE_BUCKET).remove(filename)
     return jsonify({"status": "deleted", "filename": filename})
 
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+# IMPORTANT:
+# Do NOT include app.run() here.
+# Gunicorn will run the app automatically.
