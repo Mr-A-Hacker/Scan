@@ -1,105 +1,81 @@
-import os
 from flask import Flask, request, jsonify, send_file
-from werkzeug.utils import secure_filename
+from supabase import create_client, Client
+import os
+import tempfile
 
 app = Flask(__name__)
 
-# ----------------------------------------------------
-# Ensure uploads folder exists
-# ----------------------------------------------------
-UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET")
+
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-# ----------------------------------------------------
-# Home
-# ----------------------------------------------------
 @app.route("/")
 def home():
-    return "✅ Local-storage server is running"
+    return "Supabase Storage Connected"
 
 
-# ----------------------------------------------------
-# Upload File (Saves Locally)
-# ----------------------------------------------------
+# -----------------------------
+# UPLOAD FILE
+# -----------------------------
 @app.route("/upload", methods=["POST"])
-def upload():
+def upload_file():
     if "file" not in request.files:
-        return "❌ No file part", 400
+        return jsonify({"error": "No file provided"}), 400
 
     file = request.files["file"]
+    filename = file.filename
 
-    if file.filename == "":
-        return "❌ No selected file", 400
+    # Upload to Supabase
+    res = supabase.storage.from_(SUPABASE_BUCKET).upload(filename, file.read(), {
+        "content-type": "text/plain"
+    })
 
-    filename = secure_filename(file.filename)
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    if "error" in str(res).lower():
+        return jsonify({"error": "Upload failed", "details": str(res)}), 500
 
-    file.save(filepath)
+    public_url = f"{SUPABASE_URL}/storage/v1/object/public/{SUPABASE_BUCKET}/{filename}"
 
     return jsonify({
         "status": "success",
         "filename": filename,
-        "path": filepath
+        "url": public_url
     })
 
 
-# ----------------------------------------------------
-# List Files
-# ----------------------------------------------------
-@app.route("/files")
+# -----------------------------
+# LIST FILES
+# -----------------------------
+@app.route("/files", methods=["GET"])
 def list_files():
-    files = os.listdir(UPLOAD_FOLDER)
+    files = supabase.storage.from_(SUPABASE_BUCKET).list()
     return jsonify(files)
 
 
-# ----------------------------------------------------
-# View File in Browser
-# ----------------------------------------------------
-@app.route("/view/<filename>")
+# -----------------------------
+# VIEW FILE
+# -----------------------------
+@app.route("/view/<filename>", methods=["GET"])
 def view_file(filename):
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    data = supabase.storage.from_(SUPABASE_BUCKET).download(filename)
 
-    if not os.path.exists(filepath):
+    if data is None:
         return "File not found", 404
 
-    with open(filepath, "r", errors="ignore") as f:
-        content = f.read()
+    # Save temporarily to send
+    tmp = tempfile.NamedTemporaryFile(delete=False)
+    tmp.write(data)
+    tmp.close()
 
-    return f"<pre>{content}</pre>"
-
-
-# ----------------------------------------------------
-# Download File
-# ----------------------------------------------------
-@app.route("/download/<filename>")
-def download_file(filename):
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
-
-    if not os.path.exists(filepath):
-        return jsonify({"error": "file not found"}), 404
-
-    return send_file(filepath, as_attachment=True)
+    return send_file(tmp.name, mimetype="text/plain")
 
 
-# ----------------------------------------------------
-# Delete File
-# ----------------------------------------------------
+# -----------------------------
+# DELETE FILE
+# -----------------------------
 @app.route("/delete/<filename>", methods=["DELETE"])
 def delete_file(filename):
-    filepath = os.path.join(UPLOAD_FOLDER, filename)
-
-    if not os.path.exists(filepath):
-        return jsonify({"error": "file not found"}), 404
-
-    os.remove(filepath)
+    res = supabase.storage.from_(SUPABASE_BUCKET).remove(filename)
     return jsonify({"status": "deleted", "filename": filename})
-
-
-# ----------------------------------------------------
-# Run (local only)
-# ----------------------------------------------------
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
-
