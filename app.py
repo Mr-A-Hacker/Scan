@@ -1,7 +1,8 @@
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from werkzeug.utils import secure_filename
 from b2sdk.v2 import InMemoryAccountInfo, B2Api
+from io import BytesIO
 
 app = Flask(__name__)
 
@@ -40,7 +41,7 @@ def upload():
     if file.filename == "":
         return "❌ No selected file", 400
 
-    # Use the filename provided by the client (batch script)
+    # Use the filename provided by the client
     filename = secure_filename(file.filename)
 
     # OPTIONAL: Force filename to be based on client IP
@@ -57,7 +58,7 @@ def upload():
         filename
     )
 
-    # Build file URL
+    # Build file URL (private bucket will NOT open directly)
     endpoint = os.getenv("B2_BUCKET_ENDPOINT")
     bucket_name = os.getenv("B2_BUCKET_NAME")
     file_url = f"https://{endpoint}/file/{bucket_name}/{filename}"
@@ -83,7 +84,7 @@ def list_files():
 
 
 # ----------------------------------------------------
-# Get File URL
+# Get File URL (still private)
 # ----------------------------------------------------
 @app.route("/files/<filename>")
 def get_file(filename):
@@ -93,6 +94,47 @@ def get_file(filename):
     file_url = f"https://{endpoint}/file/{bucket_name}/{filename}"
 
     return jsonify({"url": file_url})
+
+
+# ----------------------------------------------------
+# Download File (works with PRIVATE buckets)
+# ----------------------------------------------------
+@app.route("/download/<filename>")
+def download_file(filename):
+    b2 = get_b2()
+    bucket = b2.get_bucket_by_name(os.getenv("B2_BUCKET_NAME"))
+
+    # Find the file version
+    for file_version, _ in bucket.ls():
+        if file_version.file_name == filename:
+            data = bucket.download_file_by_id(file_version.id_).read()
+            return send_file(
+                BytesIO(data),
+                as_attachment=True,
+                download_name=filename
+            )
+
+    return jsonify({"error": "file not found"}), 404
+
+
+# ----------------------------------------------------
+# Delete File from Backblaze
+# ----------------------------------------------------
+@app.route("/delete/<filename>", methods=["DELETE"])
+def delete_file(filename):
+    b2 = get_b2()
+    bucket = b2.get_bucket_by_name(os.getenv("B2_BUCKET_NAME"))
+
+    # Search for the file version
+    for file_version, _ in bucket.ls():
+        if file_version.file_name == filename:
+            bucket.delete_file_version(file_version.id_, file_version.file_name)
+            return jsonify({
+                "status": "deleted",
+                "filename": filename
+            })
+
+    return jsonify({"error": "file not found"}), 404
 
 
 # ----------------------------------------------------
